@@ -9,7 +9,7 @@ import { Ledger } from '../src/ledger.js';
 import { BeneficiaryStore } from '../src/beneficiaries.js';
 import { createStandingInstruction, occurrenceProposal, screenOccurrence } from '../src/standing.js';
 import { createPriceOracle, usdEstimate } from '../src/price.js';
-import { buildAlertPayload, deliverAlert } from '../src/alerts.js';
+import { buildAlertPayload, deliverAlert, deliverAlertInBackground } from '../src/alerts.js';
 import { buildAuditBundle, verifyAuditBundle } from '../src/audit-bundle.js';
 import { replayProposal, summarizeFlips } from '../src/replay.js';
 import { badgeSvg } from '../src/badge.js';
@@ -247,6 +247,32 @@ test('alert delivery POSTs the payload when a webhook is configured; failure nev
   srv.close();
   const failed = await deliverAlert(payload, { url: 'http://127.0.0.1:1/hook' });
   assert.equal(failed.mode, 'failed');
+});
+
+test('background delivery (audit D5): returns instantly against a hanging webhook, and the POST still fires', async () => {
+  const payload = buildAlertPayload({ seq: 9, ts: 't', agent: 'a', to: 'x.testnet', amount: 400, verdict: 'BLOCKED', riskScore: 0, reasons: ['over limit'], hash: 'h', anchor: null });
+  let seen = null;
+  let release = null;
+  const hangingFetch = (url, init) => new Promise((resolve) => { seen = { url, init }; release = () => resolve({ ok: true, status: 200 }); });
+  const t0 = Date.now();
+  const receipt = deliverAlertInBackground(payload, { url: 'http://127.0.0.1:9/hook', fetchFn: hangingFetch });
+  const elapsed = Date.now() - t0;
+  assert.equal(receipt.mode, 'queued');
+  assert.equal(receipt.delivered, null);
+  assert.ok(elapsed < 500, `verdict path must not wait on the webhook (took ${elapsed} ms)`);
+  // Let the microtask that starts delivery run, without releasing the webhook.
+  await new Promise((r) => setTimeout(r, 25));
+  assert.ok(seen, 'the webhook POST was actually fired in the background');
+  assert.equal(JSON.parse(seen.init.body).alert, 'BLOCKED');
+  release();
+  await new Promise((r) => setTimeout(r, 25));
+});
+
+test('background delivery swallows a rejecting webhook without an unhandled rejection', async () => {
+  const payload = buildAlertPayload({ seq: 10, ts: 't', agent: 'a', to: 'x.testnet', amount: 1, verdict: 'REVIEW', riskScore: 30, reasons: [], hash: 'h', anchor: null });
+  const receipt = deliverAlertInBackground(payload, { url: 'http://127.0.0.1:9/hook', fetchFn: async () => { throw new Error('boom'); } });
+  assert.equal(receipt.mode, 'queued');
+  await new Promise((r) => setTimeout(r, 25)); // an unhandled rejection would fail the test run
 });
 
 // --- Items 15 + 26: audit bundle verify + ledger round-trip ----------------------

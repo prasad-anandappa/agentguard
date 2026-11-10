@@ -27,6 +27,27 @@ export function buildAlertPayload(entry, { contractId = null } = {}) {
   };
 }
 
+// Fire-and-forget delivery for the verdict path. Composing the payload and
+// showing it in the UI is synchronous; POSTing it must never delay a
+// verdict — a dead webhook would otherwise add its full timeout (~3 s,
+// plus RPC time) to every BLOCKED/REVIEW response. The POST proceeds in
+// the background; its outcome is swallowed by design (deliverAlert itself
+// already never throws — the catch here is belt-and-braces). Returns the
+// receipt the UI shows immediately.
+const inFlightDeliveries = new Set();
+export function deliverAlertInBackground(payload, opts = {}) {
+  const p = Promise.resolve()
+    .then(() => deliverAlert(payload, opts))
+    .catch(() => null);
+  inFlightDeliveries.add(p);
+  p.finally(() => inFlightDeliveries.delete(p));
+  return {
+    mode: 'queued',
+    delivered: null,
+    note: 'Alert payload composed and shown here; webhook delivery fired in the background, so a slow or dead webhook never delays the verdict.',
+  };
+}
+
 // Deliver the payload if a webhook URL is set. Never throws: alerting must
 // not break the verdict path. Returns a delivery receipt for the UI.
 export async function deliverAlert(payload, { url = process.env.ALERT_WEBHOOK_URL || null, fetchFn = fetch, timeoutMs = 3000, displayOnlyReason = null } = {}) {

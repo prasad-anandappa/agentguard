@@ -151,13 +151,13 @@ Five lines gate any payment your agent is about to make — see [`examples/`](ex
 ```js
 import { checkPayment } from './examples/check-payment.js';
 
-const gate = await checkPayment({ to: 'vendor.testnet', amount: 12, memo: 'hosting invoice' });
+const gate = checkPayment({ to: 'vendor.testnet', amount: 12, memo: 'hosting invoice' });
 if (!gate.allowed) throw new Error(`AgentGuard ${gate.verdict}: ${gate.reasons.join('; ')}`);
 // APPROVED → execute the transfer with your own wallet code.
 // REVIEW   → gate.held is true: a human decides in the review inbox first.
 ```
 
-`checkPayment` talks to a running AgentGuard service (`AGENTGUARD_URL`, default `http://localhost:8787`); the verdict, risk score, reasons, rule trace and the anchored entry all come back in one response.
+`checkPayment` is a local, synchronous wrapper over the same policy engine the service runs — no network call, nothing is anchored. It evaluates against the default policy (pass your own policy + context to match your deployment) and returns `{ allowed, held, verdict, riskScore, reasons }`. For the auditable version — hash-chained log, on-chain receipts, human review queue — run the AgentGuard service and POST `/api/propose` instead.
 
 ## Key model
 
@@ -171,6 +171,7 @@ Boring and explicit, per the security brief — full detail in [SECURITY.md](SEC
   - **cannot** transfer NEAR, add/remove keys, deploy code, or delete the account.
   - Proof: [key-creation tx 4p5mMDW1…Db2WgJnn](https://testnet.nearblocks.io/txns/4p5mMDW16zFGnqynRq7mjqk2aH7oHPkQXYvzDb2WgJnn) — the access-key permission is visible in the transaction.
 - The **log contract** accepts `log_decision` only from its owner (the operator account), and its records are append-only — no update or delete method exists.
+- **What "append-only" rests on, honestly:** it is enforced by key control. The only key the running service holds can do nothing but call `log_decision`, and the service only ever logs fresh hash-chained entries. Overwriting an existing record would require the operator's full-access key, which never leaves the operator's machine — and it would be caught: `npm run anchor-check` and the /verify page compare every on-chain record against the hash-chained ledger, so a rewritten record stops matching.
 - **Verification needs no key at all**: the /verify page, `scripts/anchor-check.mjs`, and the audit bundle all read public data.
 
 ## The Rust contract
@@ -178,8 +179,8 @@ Boring and explicit, per the security brief — full detail in [SECURITY.md](SEC
 [`contract/`](contract/) — `log.agentguard-nh.testnet`, deployed 2026-11-10:
 
 - deploy tx: [FkuoTLTm…Ws1W437uoX](https://testnet.nearblocks.io/txns/FkuoTLTmsZDhMG9X3y8j4o4w85KKx1GNnaWs1W437uoX) · init tx: [J4NUZxJJ…36ZMQ4sPuF](https://testnet.nearblocks.io/txns/J4NUZxJJWaeUhKcNdjQdZwJhiJdRPdYm1E36ZMQ4sPuF)
-- `log_decision(agent, destination, amount, verdict, risk_score, entry_hash)` — owner-only, append-only, emits an `AGENTGUARD_DECISION` log line per record.
-- `get_decision(entry_hash)` / `total_decisions()` / `owner()` — public views; `npm run anchor-check` cross-checks both the views and the transaction receipts against the local ledger.
+- `log_decision(decision_id, entry_hash, verdict)` — callable only by the operator account. It stores one compact record, `{"decision_id": "…", "verdict": "…"}`, keyed by the ledger entry's SHA-256 hash, and emits an `AG_DECISION <entry_hash> <verdict>` log line. Agent, destination, amount and risk score deliberately stay off-chain, in the hash-chained ledger — anchoring the entry hash is what makes that ledger auditable (the contract's own doc comment says exactly this).
+- `get_decision(entry_hash)` / `total_decisions()` — public views; `npm run anchor-check` cross-checks both the views and the transaction receipts against the local ledger.
 - Built + unit-tested (3 tests) in CI on every push; the same pipeline produces the deployable wasm artifact.
 
 ## Architecture

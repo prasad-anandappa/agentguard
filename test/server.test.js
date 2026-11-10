@@ -181,7 +181,9 @@ test('status API and pages: /api/status shape, /verify and /status pages serve',
   const { json } = await api('GET', '/api/status');
   assert.equal(json.service, 'agentguard');
   assert.equal(typeof json.uptimeSeconds, 'number');
-  assert.ok('contractChainHeight' in json);
+  assert.ok('contractDecisions' in json, 'status carries the contract decision count under its truthful name');
+  assert.equal(json.contractDecisions, null, 'no contract configured in tests, so the count is null');
+  assert.ok(!('contractChainHeight' in json), 'the old misnomer (it is not a chain height) is gone');
   assert.equal(json.lastAnchored, null, 'anchoring is off in tests, so nothing is anchored');
   const verify = await api('GET', '/verify');
   assert.equal(verify.status, 200);

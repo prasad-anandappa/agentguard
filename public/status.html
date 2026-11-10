@@ -46,11 +46,11 @@ async function load(){
     $('sService').innerHTML='<span class="ok">● live</span>';
     $('sUptime').textContent=human(s.uptimeSeconds);
     $('sAnchor').textContent=s.anchorMode;
-    $('sChain').innerHTML=s.chainValid?'<span class="ok">✓ valid</span>':'<span class="bad">✗ broken</span>';
-    $('sContract').innerHTML=s.dedicatedContractId?('<a href="https://testnet.nearblocks.org/address/'+s.dedicatedContractId+'" target="_blank" rel="noopener">'+s.dedicatedContractId+'</a>'):'—';
+    $('sChain').innerHTML=(s.chain&&s.chain.ok)?'<span class="ok">✓ valid</span>':'<span class="bad">✗ broken</span>';
+    $('sContract').innerHTML=s.contractId?('<a href="https://testnet.nearblocks.org/address/'+s.contractId+'" target="_blank" rel="noopener">'+s.contractId+'</a>'):'—';
     $('sHeight').textContent=s.contractDecisions===null||s.contractDecisions===undefined?'unavailable':s.contractDecisions;
     $('sDecisions').textContent=s.decisions;
-    $('sLast').innerHTML=s.lastAnchored?('#'+s.lastAnchored.seq+' '+s.lastAnchored.verdict+' · '+age(s.lastAnchored.ts)+' · <a href="'+s.lastAnchored.explorerUrl+'" target="_blank" rel="noopener">tx ↗</a>'):'none yet';
+    $('sLast').innerHTML=s.lastAnchored?('#'+s.lastAnchored.seq+' '+s.lastAnchored.verdict+' · '+age(s.lastAnchored.entryTs)+' · <a href="'+s.lastAnchored.explorerUrl+'" target="_blank" rel="noopener">tx ↗</a>'):'none yet';
     $('sChecked').textContent='Checked '+new Date().toUTCString()+' · network: NEAR testnet';
   }catch(err){
     $('sService').innerHTML='<span class="bad">● unreachable</span>';

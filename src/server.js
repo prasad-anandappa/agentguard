@@ -21,7 +21,7 @@ import { proposePayment, DEMO_SCENARIOS, DEMO_AGENTS, ATTACK_CHIPS } from './age
 import { checkCounterparty, withTimeout } from './counterparty.js';
 import { BlocklistStore } from './blocklist.js';
 import { BeneficiaryStore } from './beneficiaries.js';
-import { buildAlertPayload, deliverAlert } from './alerts.js';
+import { buildAlertPayload, deliverAlert, deliverAlertInBackground } from './alerts.js';
 import { buildAuditBundle, verifyAuditBundle } from './audit-bundle.js';
 import { replayProposal, summarizeFlips } from './replay.js';
 import { createStandingInstruction } from './standing.js';
@@ -127,7 +127,21 @@ async function buildContext(rt, agentId, proposal) {
 async function maybeAlert(rt, entry) {
   if (entry.verdict !== 'BLOCKED' && entry.verdict !== 'REVIEW') return null;
   const payload = buildAlertPayload(entry, { contractId: rt.anchor.dedicatedContractId || null });
-  const delivery = await deliverAlert(payload, rt.sandbox ? { displayOnlyReason: 'Sandbox runtime — alerts are display-only.' } : {});
+  if (rt.sandbox) {
+    const delivery = await deliverAlert(payload, { displayOnlyReason: 'Sandbox runtime — alerts are display-only.' });
+    return { payload, delivery };
+  }
+  if (!process.env.ALERT_WEBHOOK_URL) {
+    // No webhook configured: delivery resolves display-only with no
+    // network I/O, so awaiting it costs nothing and the receipt the UI
+    // shows stays exact.
+    const delivery = await deliverAlert(payload, {});
+    return { payload, delivery };
+  }
+  // Webhook configured: fire-and-forget (audit D5). The payload is still
+  // composed synchronously and returned for the UI, but the POST is NOT
+  // awaited — a hanging webhook must never delay the verdict response.
+  const delivery = deliverAlertInBackground(payload, {});
   return { payload, delivery };
 }
 
@@ -196,9 +210,11 @@ async function simulate(rt, instruction, agentId, policyOverride) {
   };
 }
 
-// Contract decision count (chain height), keyless, cached — for /api/status.
+// Contract decision count (the contract's total_decisions), keyless,
+// cached — for /api/status. It is a count of logged decisions, NOT a
+// chain/block height.
 let heightCache = { value: null, at: 0 };
-async function contractHeight(contractId) {
+async function contractDecisionCount(contractId) {
   if (!contractId) return null;
   if (Date.now() - heightCache.at < 30_000 && heightCache.contract === contractId) return heightCache.value;
   try {
@@ -315,7 +331,7 @@ const server = createServer(async (req, res) => {
         anchorMode: rt.anchor.mode,
         contractId: rt.anchor.dedicatedContractId || null,
         operatorAccount: rt.anchor.account?.accountId || null,
-        contractChainHeight: await contractHeight(rt.anchor.dedicatedContractId),
+        contractDecisions: await contractDecisionCount(rt.anchor.dedicatedContractId),
         decisions: rt.ledger.entries.length,
         chain: rt.ledger.verifyChain(),
         lastAnchored: last ? {

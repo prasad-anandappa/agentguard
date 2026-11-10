@@ -30,8 +30,14 @@ every mechanism named below is implemented in `src/` and covered by tests
   `scripts/setup-fc-key.mjs`). It is never present in the service
   environment, never committed, never logged.
 - The **log contract** accepts writes only from its owner (the operator
-  account) and exposes no update or delete method: records are append-only
-  by construction, and each record is committed to the entry's SHA-256 hash.
+  account) and exposes no update or delete method. "Append-only" is
+  enforced by key control: the only key the running service holds can do
+  nothing but call `log_decision`, and the service only ever logs fresh
+  hash-chained entries. Overwriting an existing record would require the
+  operator's full-access key, which is never present in the service
+  environment — and `anchor-check` / the /verify page would expose it,
+  because every on-chain record must match its hash-chained ledger entry.
+  Each record is committed to the entry's SHA-256 hash.
 - **Verification needs no key at all.** `scripts/anchor-check.mjs` and the
   hosted `/verify` page read public RPC data + public receipts.
 
@@ -65,7 +71,7 @@ is deliberate.
 |---|---|
 | NEAR RPC unreachable during counterparty screening | Screening reports `unavailable`, adds no findings, and the receipt records that state. The deterministic policy checks (limits, lists, patterns) still run in full. Screening absence never fabricates risk points — and never removes a hard rule. |
 | Anchoring fails (RPC down, function-call key allowance exhausted) | The entry is recorded locally with the anchor error attached; the UI shows it as unanchored. Verdicts continue (the chain keeps appending), and the gap is visible — never silently dropped. |
-| Webhook delivery fails (BLOCKED/REVIEW alert) | The verdict stands; the delivery receipt records the failure and the payload remains visible in the UI and the decision record. |
+| Webhook delivery is slow or fails (BLOCKED/REVIEW alert) | Delivery is fire-and-forget, off the verdict path: the verdict never waits on it and can never be broken by it. The composed payload remains visible in the UI and the decision record; the delivery outcome is swallowed by design rather than reported in the verdict response. |
 | Price feed unreachable (USD estimates) | Estimates render as "—". Prices are display-only and never influence a verdict. |
 | Ledger file tampered with | Hash-chain verification fails at the exact entry (`npm run verify`, `/api/health`, `/verify`); on-chain records provide the reference truth. |
 | Sandbox misuse | Judge sandboxes are in-memory, per-session, and anchoring-off by construction; they cannot write to the canonical ledger or spend the key's allowance. |
