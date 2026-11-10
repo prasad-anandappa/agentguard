@@ -43,14 +43,19 @@
       </table>
     </div>
     <p class="muted">Contract: <span class="mono">log.agentguard-nh.testnet</span> ·
-    records are read with the keyless JSON-RPC endpoint <span class="mono">rpc.testnet.near.org</span>.
+    records are read with keyless public JSON-RPC endpoints (<span class="mono">rpc.testnet.fastnear.com</span>,
+    falling back to <span class="mono">rpc.testnet.near.org</span> — the old endpoint is deprecated and refuses some networks).
     Entries marked “social anchor” were recorded earlier in the project via NEAR Social
     (they remain valid, immutable history). New entries anchor to the dedicated contract.</p>
   </div>
 </div>
 
 <script>
-const RPC='https://rpc.testnet.near.org';
+// Two public endpoints with failover: rpc.testnet.near.org is deprecated
+// and answers -429 from some networks; FastNEAR is its recommended
+// replacement. Whichever answers first wins — verification must not depend
+// on one provider's mood.
+const RPCS=['https://rpc.testnet.fastnear.com','https://rpc.testnet.near.org'];
 const OPERATOR='agentguard-nh.testnet';
 const $=id=>document.getElementById(id);
 const enc=s=>btoa(unescape(encodeURIComponent(s)));
@@ -99,10 +104,21 @@ function socialRecordMatches(e,rec){
   return r.verdict===e.verdict&&Number(r.amount)===Number(e.amount)&&r.to===e.to;
 }
 // === end verification core ===
+async function rpcPost(body){
+  let lastErr=null;
+  for(const url of RPCS){
+    try{
+      const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const data=await res.json();
+      if(data&&!data.error)return data;
+      lastErr=new Error('RPC error response');
+    }catch(e){lastErr=e;}
+  }
+  throw lastErr||new Error('RPC error');
+}
 async function rpcCall(accountId,methodName,args){
-  const res=await fetch(RPC,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:'ag',method:'query',params:{request_type:'call_function',finality:'final',account_id:accountId,method_name:methodName,args_base64:enc(JSON.stringify(args))}})});
-  const data=await res.json();
-  if(data.error||!data.result||data.result.error)throw new Error('RPC error');
+  const data=await rpcPost({jsonrpc:'2.0',id:'ag',method:'query',params:{request_type:'call_function',finality:'final',account_id:accountId,method_name:methodName,args_base64:enc(JSON.stringify(args))}});
+  if(!data.result||data.result.error)throw new Error('RPC error');
   const text=new TextDecoder().decode(new Uint8Array(data.result.result));
   let v=JSON.parse(text);
   if(typeof v==='string')v=JSON.parse(v);
@@ -110,8 +126,7 @@ async function rpcCall(accountId,methodName,args){
 }
 async function txExists(txHash){
   try{
-    const res=await fetch(RPC,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:'ag',method:'tx',params:{tx_hash:txHash,sender_account_id:OPERATOR}})});
-    const data=await res.json();
+    const data=await rpcPost({jsonrpc:'2.0',id:'ag',method:'tx',params:{tx_hash:txHash,sender_account_id:OPERATOR}});
     return Boolean(data.result&&data.result.transaction);
   }catch(_){return null}
 }

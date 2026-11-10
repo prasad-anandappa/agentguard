@@ -45,6 +45,12 @@ const STARTED_AT = new Date().toISOString();
 const DEFAULT_AGENT = 'agentguard-demo-agent';
 
 // Keyless read-only RPC provider for counterparty screening (never signs).
+// NOTE (audit D0b): rpc.testnet.near.org is deprecated and answers -429
+// from some networks (incl. the demo's VPS), which silently degraded
+// screening and the /api/status contract count to "unavailable". The
+// hosted deployment therefore sets NEAR_RPC_URL to FastNEAR's public
+// endpoint (https://rpc.testnet.fastnear.com); set it wherever the
+// default endpoint is blocked.
 const rpcProvider = new nearAPI.providers.JsonRpcProvider({
   url: process.env.NEAR_RPC_URL || 'https://rpc.testnet.near.org',
 });
