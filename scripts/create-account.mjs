@@ -9,12 +9,14 @@ import path from 'node:path';
 
 const { connect, keyStores, utils, accountCreator } = nearAPI;
 
-const CANDIDATES = [
-  'agentguard-nh.testnet',
-  'agentguard-nh-2026.testnet',
-  'agentguard-hack.testnet',
-  'agentguard-demo-nh.testnet',
-];
+const CANDIDATES = process.argv[2]
+  ? [process.argv[2]]
+  : [
+      'agentguard-nh.testnet',
+      'agentguard-nh-2026.testnet',
+      'agentguard-hack.testnet',
+      'agentguard-demo-nh.testnet',
+    ];
 
 const credDir = path.resolve('.near-credentials/testnet');
 if (CANDIDATES.some((id) => existsSync(path.join(credDir, `${id}.json`)))) {

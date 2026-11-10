@@ -1,0 +1,35 @@
+X DEMO POST — DRAFT FOR PRASAD (he publishes this himself; do not post for him)
+================================================================================
+Rules it must satisfy (from HACKATHON.md): says the project was built at NEAR
+HACKATHON · tags @NEARProtocol · hashtag #NEARHackathon · demo video or
+screenshots attached · link to the public repo.
+
+MAIN POST (copy-paste ready, attach the demo video or the 3 screenshots):
+
+---
+AI agents can hold wallets now — but who stops an agent from paying a scammer?
+
+I built AgentGuard at #NEARHackathon: a safety layer that screens every payment
+an agent proposes — spending limits, scam patterns, typosquat payees — and
+anchors every verdict to NEAR testnet so anyone can audit it.
+
+Watch it block a "prize release fee" 👇 @NEARProtocol
+Repo: https://github.com/prasad-anandappa/agentguard
+---
+
+OPTIONAL FOLLOW-UP POST (thread reply, adds the on-chain proof):
+
+---
+Every decision lands in a hash-chained log, and each hash is a real NEAR
+testnet transaction. This 45 NEAR "prize claim" payment was BLOCKED (risk 100)
+— and the block itself is on-chain:
+https://testnet.nearblocks.io/txns/EL7imtfi2KTisL5vu63UZtZxuqgGLfkN4BSSRHU5Kehn
+
+Would you let an agent spend without a guard like this? @NearBuilders
+---
+
+NOTES FOR PRASAD
+- Attach: the demo video (see docs/demo-script.md) OR screenshots of the three
+  scenario results (APPROVED / BLOCKED over-limit / BLOCKED scam).
+- After posting, copy the post URL — it goes into the submission as demoUrl.
+- The submission itself is sent only after you confirm the full payload.
