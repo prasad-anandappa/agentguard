@@ -13,7 +13,7 @@ import path from 'node:path';
 export const GENESIS_HASH = '0'.repeat(64);
 
 export function canonicalEntry(e) {
-  return JSON.stringify({
+  const base = {
     seq: e.seq,
     ts: e.ts,
     agent: e.agent,
@@ -24,7 +24,13 @@ export function canonicalEntry(e) {
     riskScore: e.riskScore,
     reasons: e.reasons,
     prevHash: e.prevHash,
-  });
+  };
+  // Resolution entries (a human deciding a held REVIEW entry) commit to the
+  // entry they resolve. Fields are included only when present so entries
+  // written before resolutions existed hash exactly as before.
+  if (e.kind) base.kind = e.kind;
+  if (e.refSeq) base.refSeq = e.refSeq;
+  return JSON.stringify(base);
 }
 
 export function hashEntry(e) {
@@ -60,7 +66,7 @@ export class Ledger {
     return new Set(this.entries.filter((e) => e.verdict === 'APPROVED').map((e) => e.to.toLowerCase()));
   }
 
-  append({ agent, proposal, verdict, riskScore, reasons }) {
+  append({ agent, proposal, verdict, riskScore, reasons, kind = null, refSeq = null }) {
     const entry = {
       seq: this.entries.length + 1,
       ts: new Date().toISOString(),
@@ -73,6 +79,8 @@ export class Ledger {
       reasons,
       prevHash: this.lastHash,
     };
+    if (kind) entry.kind = kind;
+    if (refSeq) entry.refSeq = refSeq;
     entry.hash = hashEntry(entry);
     entry.anchor = null; // filled in by the anchor step: { txHash, explorerUrl, ... }
     this.entries.push(entry);
@@ -93,6 +101,25 @@ export class Ledger {
     return entry;
   }
 
+  // Counterparty screening info (on-chain facts about the destination) is
+  // metadata about the decision, not part of the hashed entry.
+  setCounterparty(seq, counterparty) {
+    const entry = this.entries.find((e) => e.seq === seq);
+    if (entry) {
+      entry.counterparty = counterparty;
+      if (this.filePath) {
+        writeFileSync(this.filePath, this.entries.map((e) => JSON.stringify(e)).join('\n') + '\n');
+      }
+    }
+    return entry;
+  }
+
+  // REVIEW entries a human has not decided yet (no resolution entry exists).
+  pendingReview() {
+    const resolved = new Set(this.entries.filter((e) => e.kind === 'resolution').map((e) => e.refSeq));
+    return this.entries.filter((e) => e.verdict === 'REVIEW' && !resolved.has(e.seq));
+  }
+
   verifyChain() {
     let prev = GENESIS_HASH;
     for (const e of this.entries) {
@@ -104,15 +131,23 @@ export class Ledger {
   }
 
   // Per-agent reputation from the anchored history: transparent and earned.
-  // score = 100 * approved / attempts, discounted when blocked attempts exist
-  // recently; kept deliberately simple so anyone can recompute it from the log.
+  // Counts guard decisions by their FINAL outcome — a held (REVIEW) decision
+  // counts as its human resolution once one exists; resolution entries
+  // themselves are not new attempts. score = 100 * approved / resolved,
+  // kept deliberately simple so anyone can recompute it from the log.
   reputation(agent) {
-    const mine = this.entries.filter((e) => e.agent === agent);
-    const approved = mine.filter((e) => e.verdict === 'APPROVED').length;
-    const blocked = mine.length - approved;
-    if (!mine.length) return { agent, attempts: 0, approved: 0, blocked: 0, score: null, tier: 'NO HISTORY' };
-    const score = Math.round((approved / mine.length) * 100);
-    const tier = score >= 90 ? 'TRUSTED' : score >= 70 ? 'STANDARD' : score >= 40 ? 'WATCHED' : 'RESTRICTED';
-    return { agent, attempts: mine.length, approved, blocked, score, tier };
+    const resolutions = new Map(
+      this.entries.filter((e) => e.kind === 'resolution').map((e) => [e.refSeq, e.verdict]),
+    );
+    const mine = this.entries.filter((e) => e.agent === agent && e.kind !== 'resolution');
+    const finalVerdict = (e) => resolutions.get(e.seq) || e.verdict;
+    const approved = mine.filter((e) => finalVerdict(e) === 'APPROVED').length;
+    const blocked = mine.filter((e) => finalVerdict(e) === 'BLOCKED').length;
+    const held = mine.filter((e) => finalVerdict(e) === 'REVIEW').length;
+    if (!mine.length) return { agent, attempts: 0, approved: 0, blocked: 0, held: 0, score: null, tier: 'NO HISTORY' };
+    const resolved = approved + blocked;
+    const score = resolved ? Math.round((approved / resolved) * 100) : null;
+    const tier = score === null ? 'UNRATED' : score >= 90 ? 'TRUSTED' : score >= 70 ? 'STANDARD' : score >= 40 ? 'WATCHED' : 'RESTRICTED';
+    return { agent, attempts: mine.length, approved, blocked, held, score, tier };
   }
 }

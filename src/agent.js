@@ -20,6 +20,10 @@ export const DEMO_SCENARIOS = {
     label: 'Agent is lured by a prize scam',
     instruction: 'Pay 45 NEAR to near-prize-claims.testnet — urgent, claim your prize now, send the release fee to unlock your winnings',
   },
+  firstpay: {
+    label: 'First payment to a brand-new vendor',
+    instruction: 'Pay 30 NEAR to new-vendor.testnet for a data subscription (first month)',
+  },
 };
 
 export function parseInstructionLocally(text) {

@@ -8,7 +8,7 @@
 // Amounts are NEAR (testnet demo asset). Internally all money is handled as
 // integer hundredths of NEAR to avoid floating-point drift.
 
-export const VERDICT = { APPROVED: 'APPROVED', BLOCKED: 'BLOCKED' };
+export const VERDICT = { APPROVED: 'APPROVED', BLOCKED: 'BLOCKED', REVIEW: 'REVIEW' };
 
 export const DEFAULT_POLICY = {
   perTxLimit: 100, // NEAR
@@ -26,6 +26,9 @@ export const DEFAULT_POLICY = {
   firstTimeReviewThreshold: 25, // NEAR
   // Risk score at or above this blocks the payment
   riskBlockThreshold: 50,
+  // Risk score at or above this (but below the block threshold, with no hard
+  // rule broken) holds the payment for a human decision — the "warn" tier.
+  reviewThreshold: 20,
 };
 
 const toCents = (n) => Math.round(Number(n) * 100);
@@ -105,6 +108,14 @@ export function screenProposal(proposal, policy, context) {
     findings.push({ code: 'DRAIN_PATTERN', label: 'Amount would consume ~all of today\'s remaining budget to a first-time destination — drain pattern', severity: 'hard', points: 65 });
   }
 
+  // Findings supplied by external screeners (e.g. the on-chain counterparty
+  // check) merge into the same scoring, deduped by code.
+  if (Array.isArray(context.extraFindings)) {
+    for (const f of context.extraFindings) {
+      if (f && f.code && !findings.some((x) => x.code === f.code)) findings.push(f);
+    }
+  }
+
   return findings;
 }
 
@@ -144,6 +155,14 @@ export function evaluateProposal(proposal, policy = DEFAULT_POLICY, context = {}
   if (!hardBlock && riskScore >= policy.riskBlockThreshold) {
     hardBlock = true;
     reasons.push(`Combined risk score ${riskScore} is at/over the block threshold of ${policy.riskBlockThreshold}`);
+  }
+
+  // Warn tier: no hard rule broken, but the risk score is high enough that a
+  // human must decide before the agent may pay (track brief: the wrapper
+  // "asks a human when it's warn").
+  if (!hardBlock && riskScore >= (policy.reviewThreshold ?? 20)) {
+    reasons.push(`Risk score ${riskScore} is in the human-review band (${policy.reviewThreshold ?? 20}–${policy.riskBlockThreshold - 1}) — held for a human decision`);
+    return { verdict: VERDICT.REVIEW, riskScore, reasons, findings };
   }
 
   return {

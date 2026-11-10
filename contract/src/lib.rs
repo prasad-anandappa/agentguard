@@ -22,10 +22,14 @@ pub struct AgentGuardLog {
 
 #[near_bindgen]
 impl AgentGuardLog {
+    /// Deploy-time init. `owner_id` is the AgentGuard operator account — the
+    /// only account allowed to log decisions. Taking it as a parameter (not
+    /// assuming the deployer) lets the contract live on its own subaccount
+    /// (e.g. log.<operator>) while the operator calls it.
     #[init]
-    pub fn new() -> Self {
+    pub fn new(owner_id: AccountId) -> Self {
         Self {
-            owner_id: env::predecessor_account_id(),
+            owner_id,
             decisions: LookupMap::new(b"d"),
             total: 0,
         }
@@ -67,10 +71,14 @@ mod tests {
         testing_env!(builder.build());
     }
 
+    fn new_as(owner: &str) -> AgentGuardLog {
+        AgentGuardLog::new(owner.parse().unwrap())
+    }
+
     #[test]
     fn logs_and_reads_back() {
         context("agentguard-nh.testnet");
-        let mut c = AgentGuardLog::new();
+        let mut c = new_as("agentguard-nh.testnet");
         c.log_decision("1".into(), "abc123".into(), "APPROVED".into());
         c.log_decision("2".into(), "def456".into(), "BLOCKED".into());
         assert_eq!(c.total_decisions(), 2);
@@ -83,8 +91,19 @@ mod tests {
     #[should_panic(expected = "only the AgentGuard operator")]
     fn rejects_other_callers() {
         context("agentguard-nh.testnet");
-        let mut c = AgentGuardLog::new();
+        let mut c = new_as("agentguard-nh.testnet");
         context("someone-else.testnet");
         c.log_decision("3".into(), "zzz".into(), "APPROVED".into());
+    }
+
+    #[test]
+    fn owner_is_the_named_operator_not_the_deployer() {
+        // Contract deployed from a subaccount context: the deployer inits,
+        // but only the named operator may log.
+        context("log.agentguard-nh.testnet");
+        let mut c = new_as("agentguard-nh.testnet");
+        context("agentguard-nh.testnet");
+        c.log_decision("1".into(), "abc123".into(), "REVIEW".into());
+        assert_eq!(c.total_decisions(), 1);
     }
 }

@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: App tests (Node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Attack demo (offline, must stop 3/3)
+        run: node scripts/attack-demo.mjs
+
+  contract:
+    name: Log contract (Rust / near-sdk)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contract
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contract
+      - name: Contract unit tests
+        run: cargo test
+      - name: Build contract wasm
+        env:
+          RUSTFLAGS: -C link-arg=-s
+        run: cargo build --target wasm32-unknown-unknown --release
+      - name: Upload contract wasm
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentguard-log-wasm
+          path: contract/target/wasm32-unknown-unknown/release/agentguard_log.wasm
+          if-no-files-found: error

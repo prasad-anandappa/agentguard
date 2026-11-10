@@ -9,8 +9,9 @@
     "start": "node src/server.js",
     "test": "node --test",
     "create-account": "node scripts/create-account.mjs",
-    
-    
+    "attack-demo": "node scripts/attack-demo.mjs",
+    "deploy-contract": "node scripts/deploy-contract.mjs",
+    "setup-fc-key": "node scripts/setup-fc-key.mjs",
     "anchor-check": "node scripts/anchor-check.mjs"
   },
   "dependencies": {

@@ -26,7 +26,8 @@
   .scen{display:block;width:100%;text-align:left;margin:8px 0}
   .scen small{display:block;color:var(--dim);font-size:12.5px;margin-top:2px}
   .verdict{font-size:24px;font-weight:800;letter-spacing:.02em}
-  .verdict.ok{color:var(--ok)}.verdict.bad{color:var(--bad)}
+  .verdict.ok{color:var(--ok)}.verdict.bad{color:var(--bad)}.verdict.warn{color:var(--warn)}
+  .pill.warn{background:rgba(242,177,60,.15);color:var(--warn)}
   .risk{height:8px;background:#0d1319;border-radius:99px;overflow:hidden;margin:6px 0 2px}
   .risk>i{display:block;height:100%;background:var(--warn)}
   ul.reasons{margin:8px 0 0;padding-left:18px}ul.reasons li{margin:3px 0}
@@ -62,9 +63,23 @@
       </div>
       <label><input type="checkbox" id="allowOnly"> Allowlist mode — only destinations I approve</label>
       <p><button class="primary" id="savePolicy" style="margin-top:10px">Save policy</button></p>
+      <label>Policy templates</label>
+      <div class="row">
+        <button id="tplCareful" title="Low limits, allowlist on">Conservative</button>
+        <button id="tplDemo" title="The demo defaults">Demo standard</button>
+        <button id="tplCommerce" title="Higher limits for agent commerce">Commerce</button>
+      </div>
       <p class="muted">Always on, no settings needed: blocklist, scam-pattern screening
       (prize lures, seed-phrase phishing, urgency pressure, authority impersonation),
-      typosquat lookalike detection, first-time-destination and drain-pattern checks.</p>
+      typosquat lookalike detection, first-time-destination and drain-pattern checks,
+      plus an on-chain counterparty check (does the account exist? is it a contract?).</p>
+      <h2 style="margin-top:18px">Report a scam destination</h2>
+      <label>Destination account</label>
+      <input type="text" id="blDest" placeholder="scammy-account.testnet">
+      <label>Evidence (what happened)</label>
+      <input type="text" id="blEvidence" placeholder="Asked for a 'release fee' to unlock a fake prize">
+      <p><button id="blSubmit">Report to the shared blocklist</button></p>
+      <p class="muted" id="blState">Shared blocklist reports: 0</p>
       <h2 style="margin-top:18px">Agent reputation (from the log)</h2>
       <div class="rep" id="rep"><div>Attempts<b>–</b></div></div>
     </div>
@@ -74,6 +89,7 @@
       <button class="scen" data-s="legit">▶ Pay a cloud bill — 12 NEAR, in-policy<small>Expected: APPROVED</small></button>
       <button class="scen" data-s="overlimit">▶ One big upfront payment — 400 NEAR<small>Expected: BLOCKED — over the per-transaction limit</small></button>
       <button class="scen" data-s="scam">▶ A "prize release fee" — 45 NEAR to a claim site<small>Expected: BLOCKED — blocklist + scam patterns</small></button>
+      <button class="scen" data-s="firstpay">▶ First payment to a brand-new vendor — 30 NEAR<small>Expected: HELD — a human must approve a first-time payment this size</small></button>
       <label>…or tell the agent to pay something yourself:</label>
       <div class="row">
         <div style="flex:3"><input type="text" id="freeText" placeholder="Pay 20 NEAR to api-market.testnet for data credits"></div>
@@ -86,13 +102,20 @@
         <label style="margin-top:10px">Risk score <span id="vRiskNum"></span> / 100</label>
         <div class="risk"><i id="vRiskBar"></i></div>
         <ul class="reasons" id="vReasons"></ul>
+        <p class="muted" id="vCounterparty" style="margin-top:8px"></p>
         <p class="muted" id="vAnchor" style="margin-top:10px"></p>
       </div>
     </div>
   </div>
 
+  <div class="card hidden" id="reviewCard" style="margin-top:16px;border-color:var(--warn)">
+    <h2 style="color:var(--warn)">⏸ Held for human review — the agent may not pay until you decide</h2>
+    <div id="reviewList"></div>
+  </div>
+
   <div class="card" style="margin-top:16px">
     <h2>3 · The decision log — every verdict, hash-chained and anchored to NEAR testnet</h2>
+    <p><button id="dlReport">Download the audit report (JSON)</button></p>
     <table>
       <thead><tr><th>#</th><th>Time (UTC)</th><th>Destination</th><th>Amount</th><th>Verdict</th><th>Risk</th><th>Entry hash</th><th>NEAR anchor</th></tr></thead>
       <tbody id="logBody"><tr><td colspan="8" class="muted">No decisions yet — run a scenario above.</td></tr></tbody>
@@ -107,20 +130,36 @@
 const $=id=>document.getElementById(id);
 async function j(url,opts){const r=await fetch(url,opts);if(!r.ok)throw new Error((await r.json().catch(()=>({}))).error||r.status);return r.json()}
 async function loadPolicy(){const p=await j('/api/policy');$('perTx').value=p.perTxLimit;$('daily').value=p.dailyLimit;$('allowOnly').checked=p.requireAllowlist}
+function pillClass(v){return v==='APPROVED'?'ok':v==='REVIEW'?'warn':'bad'}
 async function loadLog(){
   const d=await j('/api/decisions');
   $('chainState').textContent=d.chain.ok?('valid · '+d.chain.entries+' entries'):'BROKEN at #'+d.chain.atSeq;
   const r=d.reputation;
-  $('rep').innerHTML='<div>Attempts<b>'+r.attempts+'</b></div><div>Approved<b>'+r.approved+'</b></div><div>Blocked<b>'+r.blocked+'</b></div><div>Score<b>'+(r.score===null?'–':r.score+' / 100')+'</b></div><div>Tier<b>'+r.tier+'</b></div>';
-  $('logBody').innerHTML=d.entries.length?d.entries.map(e=>'<tr><td>'+e.seq+'</td><td class="mono">'+e.ts.replace('T',' ').slice(0,19)+'</td><td class="mono">'+e.to+'</td><td>'+e.amount+' NEAR</td><td><span class="pill '+(e.verdict==='APPROVED'?'ok':'bad')+'">'+e.verdict+'</span></td><td>'+e.riskScore+'</td><td class="mono">'+e.hash.slice(0,12)+'…</td><td>'+(e.anchor&&e.anchor.anchored?'<a href="'+e.anchor.explorerUrl+'" target="_blank" rel="noopener">tx '+e.anchor.txHash.slice(0,10)+'… ↗</a>':'<span class="muted">local only</span>')+'</td></tr>').join(''):'<tr><td colspan="8" class="muted">No decisions yet — run a scenario above.</td></tr>';
+  $('rep').innerHTML='<div>Attempts<b>'+r.attempts+'</b></div><div>Approved<b>'+r.approved+'</b></div><div>Blocked<b>'+r.blocked+'</b></div><div>Held<b>'+(r.held||0)+'</b></div><div>Score<b>'+(r.score===null?'–':r.score+' / 100')+'</b></div><div>Tier<b>'+r.tier+'</b></div>';
+  const pend=d.pendingReview||[];
+  $('reviewCard').classList.toggle('hidden',!pend.length);
+  $('reviewList').innerHTML=pend.map(e=>'<div style="border-top:1px solid var(--line);padding:10px 0"><b>#'+e.seq+'</b> — pay <b>'+e.amount+' NEAR</b> to <span class="mono">'+e.to+'</span> · risk '+e.riskScore+'<br><span class="muted">'+e.reasons.join(' · ')+'</span><br><button data-approve="'+e.seq+'" style="margin-top:6px">✓ Approve payment</button> <button data-deny="'+e.seq+'" style="margin-top:6px">✕ Deny payment</button></div>').join('');
+  document.querySelectorAll('[data-approve]').forEach(b=>b.onclick=()=>decide(Number(b.dataset.approve),'approve'));
+  document.querySelectorAll('[data-deny]').forEach(b=>b.onclick=()=>decide(Number(b.dataset.deny),'deny'));
+  $('logBody').innerHTML=d.entries.length?d.entries.map(e=>'<tr><td>'+e.seq+'</td><td class="mono">'+e.ts.replace('T',' ').slice(0,19)+'</td><td class="mono">'+e.to+(e.kind==='resolution'?'<br><span class="muted">human decision on #'+e.refSeq+'</span>':'')+'</td><td>'+e.amount+' NEAR</td><td><span class="pill '+pillClass(e.verdict)+'">'+e.verdict+'</span></td><td>'+e.riskScore+'</td><td class="mono">'+e.hash.slice(0,12)+'…</td><td>'+(e.anchor&&e.anchor.anchored?'<a href="'+e.anchor.explorerUrl+'" target="_blank" rel="noopener">tx '+e.anchor.txHash.slice(0,10)+'… ↗</a>':'<span class="muted">local only</span>')+'</td></tr>').join(''):'<tr><td colspan="8" class="muted">No decisions yet — run a scenario above.</td></tr>';
+  const bl=await j('/api/blocklist').catch(()=>null);
+  if(bl)$('blState').textContent='Shared blocklist reports: '+bl.reported.length+(bl.reported.length?' ('+bl.reported.map(x=>x.destination).join(', ')+')':'');
+}
+async function decide(seq,decision){
+  try{const out=await j('/api/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({seq,decision})});showResult(out);await loadLog();}
+  catch(err){alert('Error: '+err.message)}
 }
 async function loadHealth(){const h=await j('/api/health');$('anchorMode').textContent=h.anchorMode+(h.anchorAccount?' · '+h.anchorAccount:'')}
 function showResult(out){
   const e=out.entry;$('result').classList.remove('hidden');
-  const v=$('vVerdict');v.textContent=e.verdict==='APPROVED'?'✓ APPROVED — payment may proceed':'✕ BLOCKED — payment stopped';v.className='verdict '+(e.verdict==='APPROVED'?'ok':'bad');
+  const v=$('vVerdict');
+  v.textContent=e.verdict==='APPROVED'?'✓ APPROVED — payment may proceed':e.verdict==='REVIEW'?'⏸ HELD — a human must decide (see below)':'✕ BLOCKED — payment stopped';
+  v.className='verdict '+pillClass(e.verdict);
   $('vProposal').textContent='Agent proposed: pay '+e.amount+' NEAR to '+e.to+'  ·  proposer: '+out.via;
-  $('vRiskNum').textContent=e.riskScore;$('vRiskBar').style.width=e.riskScore+'%';$('vRiskBar').style.background=e.riskScore>=50?'var(--bad)':e.riskScore>=25?'var(--warn)':'var(--ok)';
+  $('vRiskNum').textContent=e.riskScore;$('vRiskBar').style.width=e.riskScore+'%';$('vRiskBar').style.background=e.riskScore>=50?'var(--bad)':e.riskScore>=20?'var(--warn)':'var(--ok)';
   $('vReasons').innerHTML=e.reasons.map(r=>'<li>'+r+'</li>').join('');
+  const cp=e.counterparty;
+  $('vCounterparty').textContent=cp?('Counterparty check (NEAR testnet): '+(cp.status==='ok'?('account exists · '+(cp.isContract?'deployed smart contract':'plain wallet')+' · balance ≈ '+(cp.balanceNear??'?')+' NEAR · prior interactions: '+cp.priorInteractions):cp.status==='not-found'?('account not found on testnet (illustrative demo destination) · prior interactions: '+cp.priorInteractions):'unavailable — verdict does not depend on it')):'';
   $('vAnchor').innerHTML=e.anchor&&e.anchor.anchored
     ?'Anchored on NEAR testnet: <a href="'+e.anchor.explorerUrl+'" target="_blank" rel="noopener">'+e.anchor.txHash+'</a> <span class="mono">(hash '+e.hash.slice(0,16)+'…)</span>'
     :'Anchor: '+(e.anchor?(e.anchor.note||e.anchor.error||'not anchored'):'pending');
@@ -132,6 +171,26 @@ async function run(body){
 document.querySelectorAll('.scen').forEach(b=>b.onclick=()=>run({scenario:b.dataset.s}));
 $('runFree').onclick=()=>run({instruction:$('freeText').value});
 $('savePolicy').onclick=async()=>{await j('/api/policy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({perTxLimit:Number($('perTx').value),dailyLimit:Number($('daily').value),requireAllowlist:$('allowOnly').checked})});alert('Policy saved')};
+async function applyTemplate(t){
+  const T={
+    careful:{perTxLimit:25,dailyLimit:75,requireAllowlist:true,allowedDestinations:['cloud-provider.testnet','api-market.testnet','data-oracle.testnet']},
+    demo:{perTxLimit:100,dailyLimit:250,requireAllowlist:false,allowedDestinations:[]},
+    commerce:{perTxLimit:200,dailyLimit:600,requireAllowlist:false,allowedDestinations:[]},
+  };
+  await j('/api/policy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(T[t])});
+  await loadPolicy();alert('Template applied: '+t);
+}
+$('tplCareful').onclick=()=>applyTemplate('careful');
+$('tplDemo').onclick=()=>applyTemplate('demo');
+$('tplCommerce').onclick=()=>applyTemplate('commerce');
+$('blSubmit').onclick=async()=>{
+  try{await j('/api/blocklist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({destination:$('blDest').value,evidence:$('blEvidence').value})});$('blDest').value='';$('blEvidence').value='';await loadLog();alert('Reported — the destination is now blocked for every agent using this guard.');}
+  catch(err){alert('Error: '+err.message)}
+};
+$('dlReport').onclick=async()=>{
+  const r=await j('/api/report');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(r,null,2)],{type:'application/json'}));a.download='agentguard-audit-report.json';a.click();URL.revokeObjectURL(a.href);
+};
 loadPolicy();loadLog();loadHealth();
 </script>
 </body>
