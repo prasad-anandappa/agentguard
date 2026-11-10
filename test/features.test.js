@@ -66,6 +66,16 @@ test('counterparty: missing account is a fact, not a failure', async () => {
   assert.equal(cp.findings.length, 0);
 });
 
+test('counterparty: FastNEAR wording ("doesn\'t exist") also maps to not-found (audit D0b)', async () => {
+  // The exact error FastNEAR's public RPC returns for a missing account —
+  // the hosted demo runs on that endpoint, and this wording once degraded
+  // every missing-account check to "unavailable".
+  const provider = fakeProvider(() => { throw new Error("Can't complete the action because account cloud-provider.testnet doesn't exist"); });
+  const cp = await checkCounterparty('cloud-provider.testnet', { provider });
+  assert.equal(cp.status, 'not-found');
+  assert.equal(cp.exists, false);
+});
+
 test('counterparty: RPC failure degrades to unavailable, never throws', async () => {
   const provider = fakeProvider(() => { throw new Error('connection reset'); });
   const cp = await checkCounterparty('x.testnet', { provider });

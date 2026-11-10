@@ -35,7 +35,9 @@ export async function checkCounterparty(to, { provider, priorInteractions = 0 } 
     });
   } catch (e) {
     const msg = String(e.message || e);
-    if (/does not exist|not exist|unknown account/i.test(msg)) {
+    // Provider wordings differ: near.org says "does not exist", FastNEAR
+    // says "doesn't exist" — both must map to not-found, not unavailable.
+    if (/does ?n['’]?t exist|does not exist|not exist|unknown account/i.test(msg)) {
       return { ...base, status: 'not-found', exists: false, findings: [] };
     }
     return { ...base, status: 'unavailable', findings: [] };
