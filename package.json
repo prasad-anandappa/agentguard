@@ -1,0 +1,19 @@
+{
+  "name": "agentguard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AgentGuard — a policy & safety layer for AI agents that move money, with an auditable decision log anchored to NEAR testnet.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test",
+    "create-account": "node scripts/create-account.mjs",
+    
+    
+    "anchor-check": "node scripts/anchor-check.mjs"
+  },
+  "dependencies": {
+    "near-api-js": "^4.0.0"
+  }
+}

@@ -1,0 +1,8 @@
+node_modules/
+contract/node_modules/
+.env
+.near-credentials/
+data/
+build/
+*.wasm
+docs/submission-payload.local.json
