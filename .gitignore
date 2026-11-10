@@ -9,3 +9,4 @@ docs/submission-payload.local.json
 PLAN.md
 .env.*
 !.env.example
+contract/*.wasm
