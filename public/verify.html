@@ -55,6 +55,11 @@ const OPERATOR='agentguard-nh.testnet';
 const $=id=>document.getElementById(id);
 const enc=s=>btoa(unescape(encodeURIComponent(s)));
 
+// === verification core — exercised verbatim by test/verify-page.test.js ===
+// The functions between these markers are pure (no DOM) and the test suite
+// runs them against a fixture ledger produced by src/ledger.js. Do not move
+// verification logic outside the markers: this is the drift guard that keeps
+// this page's math identical to the ledger's, forever.
 async function sha256hex(text){
   const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));
   return [...new Uint8Array(buf)].map(x=>x.toString(16).padStart(2,'0')).join('');
@@ -66,6 +71,34 @@ function canonicalEntry(e){
   if(e.refSeq)base.refSeq=e.refSeq;
   return JSON.stringify(base);
 }
+const GENESIS_HASH='0'.repeat(64);
+// Exactly src/ledger.js: entry hash = sha256(canonicalEntry) ALONE — the
+// prevHash is a field inside the canonical string, not a prefix; the
+// genesis prevHash is 64 zeros, not a label.
+async function verifyChain(entries){ // oldest-first
+  let prev=GENESIS_HASH;const perSeq=new Map();
+  for(const e of entries){
+    const expect=await sha256hex(canonicalEntry(e));
+    perSeq.set(e.seq,expect===e.hash&&e.prevHash===prev);
+    prev=e.hash;
+  }
+  return perSeq;
+}
+// The Rust contract stores ONLY {decision_id, verdict} per entry hash
+// (contract/src/lib.rs) — that pair, read under the entry's own hash, is
+// the complete on-chain record. Nothing else exists to compare.
+function contractRecordMatches(e,rec){
+  return Boolean(rec)&&String(rec.decision_id)===String(e.seq)&&rec.verdict===e.verdict;
+}
+// NEAR Social (prototype) records store a JSON string {seq, verdict, risk,
+// to, amount} under the entry hash.
+function socialRecordMatches(e,rec){
+  let r=rec;
+  if(typeof r==='string'){try{r=JSON.parse(r);}catch(_){return false;}}
+  if(!r)return false;
+  return r.verdict===e.verdict&&Number(r.amount)===Number(e.amount)&&r.to===e.to;
+}
+// === end verification core ===
 async function rpcCall(accountId,methodName,args){
   const res=await fetch(RPC,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:'ag',method:'query',params:{request_type:'call_function',finality:'final',account_id:accountId,method_name:methodName,args_base64:enc(JSON.stringify(args))}})});
   const data=await res.json();
@@ -82,22 +115,15 @@ async function txExists(txHash){
     return Boolean(data.result&&data.result.transaction);
   }catch(_){return null}
 }
-function recordMatches(e,rec){
-  return rec&&String(rec.verdict)===e.verdict&&Number(rec.amount)===Number(e.amount)&&rec.destination===e.to;
-}
+
 async function check(){
   $('summary').textContent='Checking…';$('rows').innerHTML='<tr><td colspan="7" class="muted">Loading…</td></tr>';
   let d;
   try{d=await (await fetch('/api/decisions')).json();}
   catch(err){$('summary').textContent='Could not load the ledger';$('summary').className='summary bad';return}
-  const entries=[...d.entries].reverse(); // oldest first
-  // 1) local hash chain
-  let prev='GENESIS';const chainOk=new Map();
-  for(const e of entries){
-    const expect=await sha256hex(prev+canonicalEntry(e));
-    chainOk.set(e.seq,expect===e.hash&&e.prevHash===prev);
-    prev=e.hash;
-  }
+  const entries=[...d.entries].reverse(); // /api/decisions is newest-first; chain math needs oldest first
+  // 1) local hash chain (verification core above — same code the tests run)
+  const chainOk=await verifyChain(entries);
   // 2) on-chain records for anchored entries
   let anchored=0,matched=0;
   const rows=[];
@@ -106,13 +132,16 @@ async function check(){
     if(e.anchor&&e.anchor.anchored){
       anchored++;
       try{
-        if(e.anchor.mode==='contract'&&e.anchor.hash){
-          rec=await rpcCall(e.anchor.contractId,'get_decision',{entry_hash:e.anchor.hash});
+        let ok=false;
+        if(e.anchor.mode==='dedicated-contract'){
+          rec=await rpcCall(e.anchor.contractId,'get_decision',{entry_hash:e.hash});
+          ok=contractRecordMatches(e,rec);
         }else if(e.anchor.mode==='near-social'){
           const got=await rpcCall('v1.social08.testnet','get',{keys:[OPERATOR+'/agentguard/decisions/'+e.hash]});
           rec=got?got[OPERATOR]?.agentguard?.decisions?.[e.hash]:null;
+          ok=socialRecordMatches(e,rec);
         }
-        if(recordMatches(e,rec)){matched++;recState='<span class="pill ok">MATCH</span>';}
+        if(ok){matched++;recState='<span class="pill ok">MATCH</span>';}
         else recState='<span class="pill bad">MISMATCH</span>';
       }catch(err){recState='<span class="pill warn">RPC unavailable</span>';}
     }
