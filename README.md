@@ -10,7 +10,17 @@ AgentGuard is a safety layer that sits between an AI agent and its wallet. Every
 
 Built for the [NEAR Hackathon — "Build Beyond Boundaries"](https://nearhackathon.com/) · Tracks: **Agents** + **Security** · Testnet only.
 
+## The 60-second story
+
+**1 · A scam dies.** An agent is talked into paying a 45 NEAR "prize release fee" to a claim site. AgentGuard screens the destination and the memo — blocklist hit, prize lure, urgency pressure — and stops it: **BLOCKED, risk 100/100**. [See it on-chain ↗](https://testnet.nearblocks.io/txns/Fc22c8fgXxFcuSQ4xUYgR4s8BgmFCpYX9YLmoKJiSsHt)
+
+**2 · A drain dies.** The same agent tries one 400 NEAR payment — four times the human's per-transaction limit. **BLOCKED** before anything can move. [See it on-chain ↗](https://testnet.nearblocks.io/txns/BYonzu2bTGKKH1mGs8BjmyU6mLjY5ncoTcm9jwheJE12)
+
+**3 · You check the proof.** Don't trust this README: open the [**/verify page**](https://agentguard.nammaprojects.com/verify) and your own browser re-reads the records held by the `log.agentguard-nh.testnet` contract, keylessly, and compares them against the log — every verdict **MATCHES**. Or run the same check from a clone, below.
+
 ![AgentGuard demo — an approved payment, an over-limit block, and a scam block, live](docs/demo-assets/agentguard-demo.gif)
+
+*The hosted demo opens with the same three beats as one-click tour buttons.*
 
 ## Verify in 60 seconds
 
@@ -20,17 +30,25 @@ npm install
 npm run verify
 ```
 
-One command runs the full test suite (78 tests), re-checks the anchored decision log against the NEAR testnet contract, and runs the scripted attack demo — then prints a single verdict:
+One command runs the full test suite (78 tests) and the scripted attack demo, then finishes where it matters — re-checking every anchored verdict against the record the NEAR testnet contract itself holds:
 
 ```
-  ✓ tests (78 passed, 0 failed)
-  ✓ anchor-check (hash chain + on-chain verdicts)
-  ✓ attack demo (3/3 attacks stopped)
+[verify] tests: PASS (78 passed)
+[verify] attack demo: PASS (3/3 stopped)
+[verify] anchor-check: PASS
 
-AGENTGUARD VERIFY: PASS ✓ — tests green, anchored log verified, attacks stopped.
+  Hash chain: VALID (5 entries)
+  #1 APPROVED — on-chain verdict (dedicated-contract): APPROVED · tx success: true · MATCH ✓
+  #2 BLOCKED — on-chain verdict (dedicated-contract): BLOCKED · tx success: true · MATCH ✓
+  #3 BLOCKED — on-chain verdict (dedicated-contract): BLOCKED · tx success: true · MATCH ✓
+  #4 REVIEW — on-chain verdict (dedicated-contract): REVIEW · tx success: true · MATCH ✓
+  #5 APPROVED — on-chain verdict (dedicated-contract): APPROVED · tx success: true · MATCH ✓
+  ALL ANCHORED ENTRIES VERIFIED ON-CHAIN ✓
+
+AGENTGUARD VERIFY: PASS ✓ — tests green, attacks stopped, and every anchored verdict MATCHES the contract on-chain.
 ```
 
-No keys, no trust required. Prefer clicking? The hosted [**/verify page**](https://agentguard.nammaprojects.com/verify) does the same on-chain comparison in your browser.
+No keys, no trust required.
 
 ## Why AgentGuard
 

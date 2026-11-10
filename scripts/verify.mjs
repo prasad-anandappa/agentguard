@@ -2,13 +2,14 @@
 //
 //   npm run verify
 //
-// Runs three independent legs and prints one summary:
+// Runs three independent legs and prints one summary, ordered so the run
+// ENDS on the on-chain proof:
 //   1. the unit/integration test suite (node --test)
-//   2. the on-chain anchor check (scripts/anchor-check.mjs) — recomputes the
-//      hash chain and compares every anchored verdict with the record the
-//      NEAR testnet contract holds
-//   3. the attack demo (scripts/attack-demo.mjs) — three scripted
+//   2. the attack demo (scripts/attack-demo.mjs) — three scripted
 //      prompt-injection attacks, all of which must be stopped
+//   3. the on-chain anchor check (scripts/anchor-check.mjs) — recomputes
+//      the hash chain and compares every anchored verdict with the record
+//      the NEAR testnet contract holds; its MATCH lines are the finale
 //
 // Exit code 0 only when every leg passes. The anchor leg needs network
 // access to the public NEAR testnet RPC; if the RPC is unreachable the leg
@@ -38,7 +39,16 @@ const legs = [];
   console.log(`[verify] tests: ${code === 0 ? 'PASS' : 'FAIL'} (${pass ?? '?'} passed)`);
 }
 
-// Leg 2 — on-chain anchor check.
+// Leg 2 — attack demo.
+{
+  const { code, out } = run(['scripts/attack-demo.mjs']);
+  const stopped = /Attacks stopped: (\d+)\/(\d+)/.exec(out);
+  legs.push({ name: `attack demo (${stopped ? `${stopped[1]}/${stopped[2]} attacks stopped` : 'did not complete'})`, ok: code === 0, detail: out.trim().split('\n').slice(-2).join('\n') });
+  console.log(`[verify] attack demo: ${code === 0 ? 'PASS' : 'FAIL'}${stopped ? ` (${stopped[1]}/${stopped[2]} stopped)` : ''}`);
+}
+
+// Leg 3 — on-chain anchor check. Runs LAST so the verification ends on the
+// contract's own records matching the ledger, line by line.
 {
   const { code, out } = run(['scripts/anchor-check.mjs']);
   const networkDown = /fetch|ENOTFOUND|ECONN|ETIMEDOUT|network|socket/i.test(out) && !/MATCH|MISMATCH/.test(out);
@@ -46,6 +56,8 @@ const legs = [];
     const verified = /ALL ANCHORED ENTRIES VERIFIED/.test(out);
     legs.push({ name: 'anchor-check (hash chain + on-chain verdicts)', ok: true, detail: verified ? 'all anchored entries verified on-chain' : 'chain valid' });
     console.log('[verify] anchor-check: PASS');
+    console.log('');
+    console.log(out.trim().split('\n').map((l) => '  ' + l).join('\n'));
   } else if (networkDown) {
     legs.push({ name: 'anchor-check (SKIPPED — testnet RPC unreachable)', ok: true, skipped: true, detail: 'offline: leg skipped, not failed' });
     console.log('[verify] anchor-check: SKIPPED (RPC unreachable — run online for the full check)');
@@ -53,14 +65,6 @@ const legs = [];
     legs.push({ name: 'anchor-check', ok: false, detail: out.trim().split('\n').slice(-4).join('\n') });
     console.log('[verify] anchor-check: FAIL');
   }
-}
-
-// Leg 3 — attack demo.
-{
-  const { code, out } = run(['scripts/attack-demo.mjs']);
-  const stopped = /Attacks stopped: (\d+)\/(\d+)/.exec(out);
-  legs.push({ name: `attack demo (${stopped ? `${stopped[1]}/${stopped[2]} attacks stopped` : 'did not complete'})`, ok: code === 0, detail: out.trim().split('\n').slice(-2).join('\n') });
-  console.log(`[verify] attack demo: ${code === 0 ? 'PASS' : 'FAIL'}${stopped ? ` (${stopped[1]}/${stopped[2]} stopped)` : ''}`);
 }
 
 const failed = legs.filter((l) => !l.ok);
@@ -71,4 +75,4 @@ if (failed.length) {
   for (const f of failed) console.log(`\n--- ${f.name} ---\n${f.detail}`);
   process.exit(1);
 }
-console.log('\nAGENTGUARD VERIFY: PASS ✓ — tests green, anchored log verified, attacks stopped.');
+console.log('\nAGENTGUARD VERIFY: PASS ✓ — tests green, attacks stopped, and every anchored verdict MATCHES the contract on-chain.');
