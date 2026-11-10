@@ -59,7 +59,7 @@ if (!contractExists) {
   writeFileSync(contractCredPath, JSON.stringify({
     account_id: contractId,
     public_key: keyPair.publicKey.toString(),
-    private_key: keyPair.secretKey,
+    private_key: keyPair.toString(),
   }, null, 2));
   chmodSync(contractCredPath, 0o600);
   await keyStore.setKey('testnet', contractId, keyPair);

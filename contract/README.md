@@ -1,31 +1,51 @@
-# AgentGuard log contract (optional dedicated deployment)
+# AgentGuard log contract — DEPLOYED
 
-A minimal NEAR contract that records AgentGuard decision hashes on-chain:
-`log_decision(decision_id, entry_hash, verdict)`, `get_decision(entry_hash)`,
-`total_decisions()`. Only the operator account that deployed it can write.
+A minimal NEAR contract that records AgentGuard decisions on-chain.
+**Live on testnet:** [`log.agentguard-nh.testnet`](https://testnet.nearblocks.io/address/log.agentguard-nh.testnet)
+(deploy tx [FkuoTLTm…](https://testnet.nearblocks.io/txns/FkuoTLTmsZDhMG9X3y8j4o4w85KKx1GNnaWs1W437uoX),
+init tx [J4NUZxJJ…](https://testnet.nearblocks.io/txns/J4NUZxJJWaeUhKcNdjQdZwJhiJdRPdYm1E36ZMQ4sPuF)).
 
-**How the live demo anchors today:** the app's anchor module
-(`../src/anchor.js`) writes each decision hash to NEAR testnet via the NEAR
-Social testnet contract (`v1.social08.testnet`, method `set`) — real,
-explorer-verifiable testnet transactions with zero deployment needed. If this
-dedicated contract is deployed, set `AGENTGUARD_CONTRACT_ID` in the
-environment and the same module calls `log_decision` on it instead. The data
-recorded is identical either way.
+Interface:
 
-## Build & deploy (testnet)
+- `log_decision(agent, destination, amount, verdict, risk_score, entry_hash)` → index.
+  Owner-only (`agentguard-nh.testnet`), append-only — there is no update or
+  delete method. Emits an `AGENTGUARD_DECISION` log line per record.
+- `get_decision(index)` → the stored record · `total_decisions()` · `owner()`.
 
-Prereqs: Rust + `cargo-near` (https://github.com/near/cargo-near), and a funded
-testnet account (free from the testnet faucet / wallet).
+The app's anchor module (`../src/anchor.js`) calls `log_decision` whenever
+`AGENTGUARD_CONTRACT_ID` is set (it is, in the live demo), authenticating with
+a **function-call access key scoped to this one method** — see the main
+README's "Key model". Without the variable it falls back to anchoring via
+the NEAR Social testnet contract (`v1.social08.testnet` `set`), which the
+earliest demo decisions used; `npm run anchor-check` verifies both modes.
+
+## Build
+
+CI (`.github/workflows/ci.yml`) runs `cargo test` (3 unit tests: logging,
+read-back, non-owner rejection) and builds the wasm on every push, publishing
+it as the `agentguard-log-wasm` artifact. Locally:
 
 ```sh
 cd contract
-cargo near build
-# deploy to a sub-account of your testnet account, then initialise:
-near deploy <contract.account.testnet> target/near/agentguard_log.wasm new '{}'
+rustup target add wasm32-unknown-unknown
+cargo test
+cargo build --target wasm32-unknown-unknown --release
+# wasm: target/wasm32-unknown-unknown/release/agentguard_log.wasm
 ```
 
-Note: the hackathon demo environment used for the submission run did not have
-a Rust toolchain available, so the shipped demo anchors through NEAR Social
-(see above) and this contract is provided as the dedicated-deployment source.
-Its unit tests (`cargo test`) cover logging, read-back, and the
-operator-only write rule.
+(`near-sdk` is pinned to `=5.1.0` — the contract targets that `#[near_bindgen]`
+API; a floating `5.x` resolves to newer SDKs whose `#[near]` macro style this
+code predates.)
+
+## Deploy (testnet)
+
+```sh
+node scripts/deploy-contract.mjs   # creates log.<operator>.testnet if needed,
+                                   # deploys, initialises new(owner = operator)
+node scripts/setup-fc-key.mjs      # mints the scoped function-call key the
+                                   # app anchors with
+```
+
+Then set `AGENTGUARD_CONTRACT_ID=log.<operator>.testnet` and point
+`NEAR_TESTNET_CREDENTIALS` at the function-call key file. Done — the running
+service never holds a full-access key.

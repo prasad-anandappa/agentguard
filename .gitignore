@@ -7,3 +7,5 @@ build/
 *.wasm
 docs/submission-payload.local.json
 PLAN.md
+.env.*
+!.env.example

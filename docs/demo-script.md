@@ -1,9 +1,10 @@
 # Demo script — AgentGuard (for Prasad to record, ~90 seconds)
 
 Goal: one complete, judge-proof moment — agent proposes, guard decides, NEAR
-proves it. Record the browser at http://localhost:8787 (start with
-`npm start` from the repo folder; the header should show
-"Decision log anchor: near-social · agentguard-nh.testnet").
+proves it. Record the browser at https://agentguard.nammaprojects.com
+(or http://localhost:8787 after `npm start` from the repo folder; the header
+should show "Decision log anchor: dedicated-contract ·
+agentguard-nh.testnet").
 
 ## Shot list
 
@@ -19,15 +20,21 @@ proves it. Record the browser at http://localhost:8787 (start with
 4. **Over-limit payment (0:35–0:50)** — Click **"One big upfront payment —
    400 NEAR"**. Show **BLOCKED** and the reason: "exceeds the per-transaction
    limit of 100 NEAR" — even though the payee is the same trusted vendor.
-5. **The scam (0:50–1:15)** — Click **"A prize release fee — 45 NEAR"**. Show
+5. **The scam (0:50–1:10)** — Click **"A prize release fee — 45 NEAR"**. Show
    **BLOCKED**, risk 100, reasons: blocklisted destination, prize-claim lure,
    urgency pressure. "The agent was manipulated by the memo — the guard was
    not."
-6. **The proof (1:15–1:30)** — Click the anchor link on the scam row. The
-   NEAR testnet explorer opens showing the real transaction with the
-   decision hash and BLOCKED verdict. "Every verdict — approve or block — is
-   anchored to NEAR testnet. Anyone can audit what the agent tried to do."
-   Optional terminal beat: run `node scripts/anchor-check.mjs` and show
+6. **The grey zone (1:10–1:20)** — Click **"First payment to a brand-new
+   vendor — 30 NEAR"**. Show the amber **HELD FOR HUMAN REVIEW** card, then
+   click **✓ Approve & log my decision**. "Not clean, not clearly a scam —
+   so a human decides, and that decision is logged too."
+7. **The proof (1:20–1:35)** — Click the anchor link on any row. The NEAR
+   testnet explorer opens showing the real transaction into the project's
+   own log contract (`log.agentguard-nh.testnet`) with the decision hash and
+   verdict. "Every verdict — approve, block, or held — is anchored to NEAR
+   testnet by a function-call key that can do nothing else. Anyone can
+   audit what the agent tried to do."
+   Optional terminal beat: run `npm run anchor-check` and show
    "ALL ANCHORED ENTRIES VERIFIED ON-CHAIN ✓".
 
 ## If screenshots instead of video

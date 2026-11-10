@@ -54,7 +54,7 @@ const outPath = path.join(ROOT, '.near-credentials', 'testnet', `${operatorId}-f
 writeFileSync(outPath, JSON.stringify({
   account_id: operatorId,
   public_key: keyPair.publicKey.toString(),
-  private_key: keyPair.secretKey,
+  private_key: keyPair.toString(),
 }, null, 2));
 chmodSync(outPath, 0o600);
 console.log(`Function-call key added for ${operatorId} — tx ${outcome?.transaction?.hash}`);
