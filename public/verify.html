@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentGuard — verify the log on-chain, in your browser</title>
+<style>
+  :root{--bg:#0b0f14;--card:#131a22;--line:#243040;--txt:#e8eef4;--dim:#93a5b5;--ok:#2fbf71;--bad:#ef4b4b;--warn:#f2b13c;--acc:#00ec97}
+  *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:1060px;margin:0 auto;padding:24px 16px 60px}
+  h1{font-size:26px;margin:0 0 4px}h1 .g{color:var(--acc)}
+  .muted{color:var(--dim);font-size:13.5px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-top:16px}
+  .summary{font-size:18px;font-weight:700}
+  .summary.ok{color:var(--ok)}.summary.bad{color:var(--bad)}
+  .tablewrap{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;min-width:640px}
+  th,td{border-bottom:1px solid var(--line);padding:7px 6px;text-align:left;vertical-align:top}
+  th{color:var(--dim);font-weight:600}
+  .pill{border-radius:99px;padding:1px 8px;font-size:12px;font-weight:700;white-space:nowrap}
+  .pill.ok{background:rgba(47,191,113,.15);color:var(--ok)}.pill.bad{background:rgba(239,75,75,.15);color:var(--bad)}.pill.warn{background:rgba(242,177,60,.15);color:var(--warn)}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;word-break:break-all}
+  a{color:var(--acc)}
+  button{cursor:pointer;border:1px solid var(--line);background:#1a2634;color:var(--txt);border-radius:9px;padding:10px 14px;font-size:14.5px;min-height:42px}
+  button:hover{border-color:var(--acc)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Agent<span class="g">Guard</span> — on-chain verification</h1>
+  <p class="muted">This page re-reads the decision log's records <b>directly from the NEAR testnet contract</b>,
+  in your browser, with no keys and no trust in this server — then compares them against the ledger.
+  It also re-computes the SHA-256 hash chain locally. <a href="/">← back to the demo</a></p>
+
+  <div class="card">
+    <div class="summary" id="summary" aria-live="polite">Checking…</div>
+    <p class="muted" id="detail"></p>
+    <p><button id="recheck">Re-check now</button></p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>#</th><th>Verdict</th><th>Amount</th><th>Destination</th><th>Hash chain</th><th>On-chain record</th><th>Transaction</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="7" class="muted">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <p class="muted">Contract: <span class="mono">log.agentguard-nh.testnet</span> ·
+    records are read with the keyless JSON-RPC endpoint <span class="mono">rpc.testnet.near.org</span>.
+    Entries marked “social anchor” were recorded earlier in the project via NEAR Social
+    (they remain valid, immutable history). New entries anchor to the dedicated contract.</p>
+  </div>
+</div>
+
+<script>
+const RPC='https://rpc.testnet.near.org';
+const OPERATOR='agentguard-nh.testnet';
+const $=id=>document.getElementById(id);
+const enc=s=>btoa(unescape(encodeURIComponent(s)));
+
+async function sha256hex(text){
+  const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map(x=>x.toString(16).padStart(2,'0')).join('');
+}
+// Mirror of src/ledger.js canonicalEntry — must stay byte-identical.
+function canonicalEntry(e){
+  const base={seq:e.seq,ts:e.ts,agent:e.agent,to:e.to,amount:e.amount,memo:e.memo,verdict:e.verdict,riskScore:e.riskScore,reasons:e.reasons,prevHash:e.prevHash};
+  if(e.kind)base.kind=e.kind;
+  if(e.refSeq)base.refSeq=e.refSeq;
+  return JSON.stringify(base);
+}
+async function rpcCall(accountId,methodName,args){
+  const res=await fetch(RPC,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:'ag',method:'query',params:{request_type:'call_function',finality:'final',account_id:accountId,method_name:methodName,args_base64:enc(JSON.stringify(args))}})});
+  const data=await res.json();
+  if(data.error||!data.result||data.result.error)throw new Error('RPC error');
+  const text=new TextDecoder().decode(new Uint8Array(data.result.result));
+  let v=JSON.parse(text);
+  if(typeof v==='string')v=JSON.parse(v);
+  return v;
+}
+async function txExists(txHash){
+  try{
+    const res=await fetch(RPC,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:'ag',method:'tx',params:{tx_hash:txHash,sender_account_id:OPERATOR}})});
+    const data=await res.json();
+    return Boolean(data.result&&data.result.transaction);
+  }catch(_){return null}
+}
+function recordMatches(e,rec){
+  return rec&&String(rec.verdict)===e.verdict&&Number(rec.amount)===Number(e.amount)&&rec.destination===e.to;
+}
+async function check(){
+  $('summary').textContent='Checking…';$('rows').innerHTML='<tr><td colspan="7" class="muted">Loading…</td></tr>';
+  let d;
+  try{d=await (await fetch('/api/decisions')).json();}
+  catch(err){$('summary').textContent='Could not load the ledger';$('summary').className='summary bad';return}
+  const entries=[...d.entries].reverse(); // oldest first
+  // 1) local hash chain
+  let prev='GENESIS';const chainOk=new Map();
+  for(const e of entries){
+    const expect=await sha256hex(prev+canonicalEntry(e));
+    chainOk.set(e.seq,expect===e.hash&&e.prevHash===prev);
+    prev=e.hash;
+  }
+  // 2) on-chain records for anchored entries
+  let anchored=0,matched=0;
+  const rows=[];
+  for(const e of entries){
+    let rec=null,recState='—';
+    if(e.anchor&&e.anchor.anchored){
+      anchored++;
+      try{
+        if(e.anchor.mode==='contract'&&e.anchor.hash){
+          rec=await rpcCall(e.anchor.contractId,'get_decision',{entry_hash:e.anchor.hash});
+        }else if(e.anchor.mode==='near-social'){
+          const got=await rpcCall('v1.social08.testnet','get',{keys:[OPERATOR+'/agentguard/decisions/'+e.hash]});
+          rec=got?got[OPERATOR]?.agentguard?.decisions?.[e.hash]:null;
+        }
+        if(recordMatches(e,rec)){matched++;recState='<span class="pill ok">MATCH</span>';}
+        else recState='<span class="pill bad">MISMATCH</span>';
+      }catch(err){recState='<span class="pill warn">RPC unavailable</span>';}
+    }
+    rows.push('<tr><td>'+e.seq+'</td><td><span class="pill '+(e.verdict==='APPROVED'?'ok':e.verdict==='REVIEW'?'warn':'bad')+'">'+e.verdict+'</span></td><td>'+e.amount+' NEAR</td><td class="mono">'+e.to+'</td><td>'+(chainOk.get(e.seq)?'<span class="pill ok">✓ linked</span>':'<span class="pill bad">✗ broken</span>')+'</td><td>'+recState+'</td><td>'+(e.anchor&&e.anchor.explorerUrl?'<a href="'+e.anchor.explorerUrl+'" target="_blank" rel="noopener">tx ↗</a>':'<span class="muted">—</span>')+'</td></tr>');
+  }
+  $('rows').innerHTML=rows.join('');
+  const chainValid=[...chainOk.values()].every(Boolean);
+  const sum=$('summary');
+  if(chainValid&&anchored>0&&matched===anchored){sum.textContent='✓ VERIFIED — hash chain intact, all '+anchored+' on-chain records match the ledger';sum.className='summary ok';}
+  else if(chainValid){sum.textContent='Hash chain intact · '+matched+'/'+anchored+' on-chain records matched';sum.className='summary '+(matched===anchored?'ok':'bad');}
+  else{sum.textContent='✗ HASH CHAIN BROKEN — the ledger does not verify';sum.className='summary bad';}
+  $('detail').textContent=entries.length+' entries checked in your browser at '+new Date().toUTCString()+'.';
+}
+$('recheck').onclick=check;
+check();
+</script>
+</body>
+</html>

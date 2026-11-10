@@ -9,6 +9,7 @@
 import { createHash } from 'node:crypto';
 import { appendFileSync, readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { categoryOf } from './policy.js';
 
 export const GENESIS_HASH = '0'.repeat(64);
 
@@ -55,15 +56,105 @@ export class Ledger {
     return this.entries.length ? this.entries[this.entries.length - 1].hash : GENESIS_HASH;
   }
 
-  spentToday(now = new Date()) {
+  // Final outcome per entry seq: a held (REVIEW) decision counts as its
+  // human resolution once one exists. Resolution entries map to themselves.
+  finalVerdicts() {
+    const resolutions = new Map(
+      this.entries.filter((e) => e.kind === 'resolution').map((e) => [e.refSeq, e.verdict]),
+    );
+    const out = new Map();
+    for (const e of this.entries) out.set(e.seq, resolutions.get(e.seq) || e.verdict);
+    return out;
+  }
+
+  spentToday(now = new Date(), agent = null) {
     const day = now.toISOString().slice(0, 10);
     return this.entries
-      .filter((e) => e.verdict === 'APPROVED' && e.ts.slice(0, 10) === day)
+      .filter((e) => e.verdict === 'APPROVED' && e.ts.slice(0, 10) === day && (!agent || e.agent === agent))
       .reduce((s, e) => s + Number(e.amount), 0);
   }
 
-  seenDestinations() {
-    return new Set(this.entries.filter((e) => e.verdict === 'APPROVED').map((e) => e.to.toLowerCase()));
+  seenDestinations(agent = null) {
+    return new Set(this.entries
+      .filter((e) => e.verdict === 'APPROVED' && (!agent || e.agent === agent))
+      .map((e) => e.to.toLowerCase()));
+  }
+
+  // Raw recent attempts for the velocity check: non-resolution entries from
+  // the last maxAgeMs, with their final verdicts, oldest first.
+  recentPayments(agent = null, maxAgeMs = 24 * 3600_000, now = Date.now()) {
+    const finals = this.finalVerdicts();
+    return this.entries
+      .filter((e) => e.kind !== 'resolution' && (!agent || e.agent === agent))
+      .map((e) => ({ to: e.to.toLowerCase(), amount: Number(e.amount), ts: Date.parse(e.ts), verdict: finals.get(e.seq) || e.verdict }))
+      .filter((p) => Number.isFinite(p.ts) && now - p.ts <= maxAgeMs);
+  }
+
+  // Month-to-date approved spend per memo category (final outcomes).
+  categorySpendThisMonth(agent = null, now = new Date()) {
+    const month = now.toISOString().slice(0, 7);
+    const finals = this.finalVerdicts();
+    const out = { hosting: 0, dev: 0, tools: 0, other: 0 };
+    for (const e of this.entries) {
+      if (e.kind === 'resolution') continue;
+      if (agent && e.agent !== agent) continue;
+      if (!e.ts.startsWith(month)) continue;
+      if (finals.get(e.seq) !== 'APPROVED') continue;
+      out[categoryOf(e.memo)] += Number(e.amount);
+    }
+    return out;
+  }
+
+  // Headline numbers for the demo's live stats strip — all computed from the
+  // ledger, nothing hard-coded. "Attacks stopped" and "NEAR protected" use
+  // final outcomes: a held payment a human then denied counts once, as the
+  // original attempt.
+  stats() {
+    const finals = this.finalVerdicts();
+    const attempts = this.entries.filter((e) => e.kind !== 'resolution');
+    const blocked = attempts.filter((e) => finals.get(e.seq) === 'BLOCKED');
+    return {
+      decisions: attempts.length,
+      totalEntries: this.entries.length,
+      approved: attempts.filter((e) => finals.get(e.seq) === 'APPROVED').length,
+      attacksStopped: blocked.length,
+      nearProtected: Math.round(blocked.reduce((s, e) => s + Number(e.amount), 0) * 100) / 100,
+      heldPending: this.pendingReview().length,
+      anchored: this.entries.filter((e) => e.anchor?.anchored).length,
+      chainValid: this.verifyChain().ok,
+    };
+  }
+
+  // Counterparty trust: consecutive clean (finally APPROVED) payments per
+  // destination. A final BLOCK resets the streak; an unresolved REVIEW
+  // neither builds nor breaks it. At `threshold` consecutive approvals the
+  // counterparty graduates to trusted.
+  counterpartyTrust(threshold = 3) {
+    const finals = this.finalVerdicts();
+    const byDest = new Map();
+    for (const e of this.entries) {
+      if (e.kind === 'resolution') continue;
+      const key = e.to.toLowerCase();
+      if (!byDest.has(key)) byDest.set(key, { destination: key, cleanStreak: 0, totalApproved: 0, totalBlocked: 0 });
+      const rec = byDest.get(key);
+      const v = finals.get(e.seq);
+      if (v === 'APPROVED') { rec.cleanStreak += 1; rec.totalApproved += 1; } else if (v === 'BLOCKED') { rec.cleanStreak = 0; rec.totalBlocked += 1; }
+    }
+    const out = {};
+    for (const [key, rec] of byDest) {
+      out[key] = {
+        ...rec,
+        threshold,
+        trusted: rec.cleanStreak >= threshold,
+        progress: `${Math.min(rec.cleanStreak, threshold)}/${threshold}`,
+      };
+    }
+    return out;
+  }
+
+  trustedDestinations(threshold = 3) {
+    const trust = this.counterpartyTrust(threshold);
+    return new Set(Object.values(trust).filter((t) => t.trusted).map((t) => t.destination));
   }
 
   append({ agent, proposal, verdict, riskScore, reasons, kind = null, refSeq = null }) {
@@ -101,6 +192,37 @@ export class Ledger {
     return entry;
   }
 
+  // Persist every entry (used after import / bulk metadata updates).
+  saveAll() {
+    if (this.filePath) {
+      writeFileSync(this.filePath, this.entries.map((e) => JSON.stringify(e)).join('\n') + (this.entries.length ? '\n' : ''));
+    }
+  }
+
+  // Build a ledger from exported entries, validating the hash chain.
+  // Returns { ledger, chain } — callers must check chain.ok before trusting.
+  static fromEntries(entries, filePath = null) {
+    const ledger = new Ledger(null);
+    ledger.entries = Array.isArray(entries) ? entries.map((e) => ({ ...e })) : [];
+    const chain = ledger.verifyChain();
+    if (chain.ok && filePath) {
+      ledger.filePath = filePath;
+      mkdirSync(path.dirname(filePath), { recursive: true });
+      ledger.saveAll();
+    }
+    return { ledger, chain };
+  }
+
+  // The verdict rule trace is presentation metadata, not hashed content.
+  setTrace(seq, trace) {
+    const entry = this.entries.find((e) => e.seq === seq);
+    if (entry) {
+      entry.trace = trace;
+      if (this.filePath) this.saveAll();
+    }
+    return entry;
+  }
+
   // Counterparty screening info (on-chain facts about the destination) is
   // metadata about the decision, not part of the hashed entry.
   setCounterparty(seq, counterparty) {
@@ -112,6 +234,25 @@ export class Ledger {
       }
     }
     return entry;
+  }
+
+  // Reconstruct the evaluation context as it stood just BEFORE the given
+  // entry: what the guard had seen, spent and trusted at that moment. Used
+  // by decision replay so a policy change is the only variable that moves.
+  // (Beneficiary caps are current-state and not reconstructed.)
+  contextBefore(entry, threshold = 3) {
+    const tmp = new Ledger(null);
+    tmp.entries = this.entries.filter((e) => e.seq < entry.seq);
+    const ts = Date.parse(entry.ts);
+    return {
+      now: ts,
+      spentToday: tmp.spentToday(new Date(ts), entry.agent),
+      seenDestinations: tmp.seenDestinations(entry.agent),
+      trustedDestinations: tmp.trustedDestinations(threshold),
+      recentPayments: tmp.recentPayments(entry.agent, 24 * 3600_000, ts),
+      spentThisMonthByCategory: tmp.categorySpendThisMonth(entry.agent, new Date(ts)),
+      beneficiaryCap: null,
+    };
   }
 
   // REVIEW entries a human has not decided yet (no resolution entry exists).

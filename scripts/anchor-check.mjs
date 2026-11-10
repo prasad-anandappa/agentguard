@@ -1,9 +1,11 @@
 // Independent verification of the AgentGuard decision log against NEAR
 // testnet. Keyless and read-only — anyone (including judges) can run it:
 //
-//   node scripts/anchor-check.mjs
+//   node scripts/anchor-check.mjs                    # verify data/decisions.jsonl
+//   node scripts/anchor-check.mjs --bundle f.json    # verify an audit bundle
+//                                                    # (GET /api/audit-bundle)
 //
-// It (1) recomputes the local hash chain from data/decisions.jsonl,
+// It (1) recomputes the hash chain from the entries,
 // (2) for every anchored entry, reads the verdict recorded on NEAR testnet
 // for that entry's hash — via the NEAR Social contract's `get` for
 // near-social anchors, or via the dedicated AgentGuard log contract's
@@ -16,18 +18,33 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Ledger } from '../src/ledger.js';
 import { SOCIAL_TESTNET } from '../src/anchor.js';
+import { verifyAuditBundle } from '../src/audit-bundle.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ACCOUNT_ID = process.env.NEAR_TESTNET_ACCOUNT_ID || 'agentguard-nh.testnet';
 const CONTRACT_ID = process.env.AGENTGUARD_CONTRACT_ID || 'log.agentguard-nh.testnet';
-const file = path.join(ROOT, 'data', 'decisions.jsonl');
 
-if (!existsSync(file)) {
-  console.error('No data/decisions.jsonl yet — run the app and make some decisions first.');
-  process.exit(1);
+let ledger;
+const bundleIdx = process.argv.indexOf('--bundle');
+if (bundleIdx >= 0) {
+  const bundleFile = process.argv[bundleIdx + 1];
+  if (!bundleFile || !existsSync(bundleFile)) {
+    console.error(`Audit bundle not found: ${bundleFile || '(missing path)'}`);
+    process.exit(1);
+  }
+  const bundle = JSON.parse(readFileSync(bundleFile, 'utf8'));
+  const check = verifyAuditBundle(bundle);
+  console.log(`Audit bundle: ${check.ok ? `VALID (${check.entryCount} entries, tip ${String(check.chainTip).slice(0, 16)}…)` : `INVALID — ${check.errors.join('; ')}`}`);
+  if (!check.ok) process.exit(1);
+  ledger = Ledger.fromEntries(bundle.entries).ledger;
+} else {
+  const file = path.join(ROOT, 'data', 'decisions.jsonl');
+  if (!existsSync(file)) {
+    console.error('No data/decisions.jsonl yet — run the app and make some decisions first.');
+    process.exit(1);
+  }
+  ledger = new Ledger(file);
 }
-
-const ledger = new Ledger(file);
 const chain = ledger.verifyChain();
 console.log(`Hash chain: ${chain.ok ? `VALID (${chain.entries} entries)` : `BROKEN at seq ${chain.atSeq}: ${chain.why}`}`);
 if (!chain.ok) process.exit(1);

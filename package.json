@@ -8,6 +8,7 @@
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test",
+    "verify": "node scripts/verify.mjs",
     "create-account": "node scripts/create-account.mjs",
     "attack-demo": "node scripts/attack-demo.mjs",
     "deploy-contract": "node scripts/deploy-contract.mjs",
