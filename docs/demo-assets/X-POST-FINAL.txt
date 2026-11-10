@@ -1,0 +1,33 @@
+X POST PACK — AgentGuard · NEAR HACKATHON (FINAL — Prasad posts this himself)
+=============================================================================
+Attach to the MAIN POST: the 4 screenshots in this folder
+(01-policy-and-scenarios.png, 02-verdict-approved-12near.png,
+03-verdict-blocked-400near-overlimit.png, 04-verdict-blocked-45near-scam.png;
+05-decision-log.png is a spare / can go on Reply 1).
+After posting, copy the main post URL — it becomes the submission's demoUrl.
+Character counts (raw / X-weighted where every URL counts as 23) are listed
+under each post; every post is within the 280 limit by BOTH counts.
+
+MAIN POST  [276 raw chars / 253 X-weighted]
+------------------------------------------------------------------------
+AI agents can hold wallets — who stops a scam payment?
+
+I built AgentGuard at the NEAR HACKATHON: it screens each payment (limits, scam patterns, typosquats) and anchors each verdict to NEAR testnet.
+
+https://github.com/prasad-anandappa/agentguard @NEARProtocol #NEARHackathon
+
+FOLLOW-UP REPLY 1 of 2 (reply to the main post)  [279 raw chars / 168 X-weighted]
+------------------------------------------------------------------------
+Proof — all verdicts are real NEAR testnet txs 👇
+✅ APPROVED — 12 NEAR hosting
+https://testnet.nearblocks.org/txns/H4YrhT7HCvh3uW5xim3qLnNbhb8QjEBG6pAMeUr9JX5e
+🛑 BLOCKED — 400 NEAR, over per-tx limit
+https://testnet.nearblocks.org/txns/8CffrpEAKY31EtfE5TuSjLfewvgWik1CgsuF11hBnE8w
+
+FOLLOW-UP REPLY 2 of 2 (reply to Reply 1)  [189 raw chars / 133 X-weighted]
+------------------------------------------------------------------------
+🛑 BLOCKED · 45 NEAR "prize release fee" scam — risk 100
+https://testnet.nearblocks.org/txns/EL7imtfi2KTisL5vu63UZtZxuqgGLfkN4BSSRHU5Kehn
+
+The agent was fooled by the memo. The guard wasn't.
+
