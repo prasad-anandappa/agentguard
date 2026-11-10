@@ -9,6 +9,12 @@ crate-type = ["cdylib"]
 [dependencies]
 near-sdk = "5.1"
 
+# Unit tests build near-sdk for the host target, which near-sdk only allows
+# with the unit-testing feature. Dev-dependency scoping keeps that feature
+# out of the deployed wasm build.
+[dev-dependencies]
+near-sdk = { version = "5.1", features = ["unit-testing"] }
+
 [profile.release]
 codegen-units = 1
 opt-level = "z"
