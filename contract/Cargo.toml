@@ -8,6 +8,9 @@ crate-type = ["cdylib"]
 
 [dependencies]
 near-sdk = "5.1"
+# Direct dependency because near-sdk's Borsh derive macros look `borsh` up
+# in this crate's own manifest (proc_macro_crate) when compiling tests.
+borsh = "1"
 
 # Unit tests build near-sdk for the host target, which near-sdk only allows
 # with the unit-testing feature. Dev-dependency scoping keeps that feature
